@@ -201,8 +201,7 @@ private:
 	template <typename DeviceClass>
 	static std::unique_ptr<device_t> create_device(device_type_impl_base const &type, machine_config const &mconfig, char const *tag, device_t *owner, u32 clock)
 	{
-		//return std::make_unique<DeviceClass>(mconfig, tag, owner, clock);
-		return make_unique_clear<DeviceClass>(mconfig, tag, owner, clock);
+		return std::make_unique<DeviceClass>(mconfig, tag, owner, clock);
 	}
 
 	template <typename DriverClass>
@@ -211,7 +210,7 @@ private:
 		assert(!owner);
 		assert(!clock);
 
-		return make_unique_clear<DriverClass>(mconfig, type, tag);
+		return std::make_unique<DriverClass>(mconfig, type, tag);
 	}
 
 	create_func const m_creator;
@@ -300,8 +299,7 @@ public:
 	template <typename... Params>
 	std::unique_ptr<DeviceClass> create(machine_config &mconfig, char const *tag, device_t *owner, Params &&... args) const
 	{
-		//return std::make_unique<DeviceClass>(mconfig, tag, owner, std::forward<Params>(args)...);
-		return make_unique_clear<DeviceClass>(mconfig, tag, owner, std::forward<Params>(args)...);
+		return std::make_unique<DeviceClass>(mconfig, tag, owner, std::forward<Params>(args)...);
 	}
 
 	template <typename... Params> DeviceClass &operator()(machine_config &mconfig, char const *tag, Params &&... args) const;
@@ -468,10 +466,6 @@ constexpr auto driver_device_creator = &emu::detail::driver_tag_func<DriverClass
 /// reattempting to start the device that threw the exception.
 /// \sa device_t::device_start device_interface::interface_pre_start
 class device_missing_dependencies : public emu_exception { };
-
-
-// timer IDs for devices
-typedef u32 device_timer_id;
 
 
 /// \brief Base class for devices
@@ -698,19 +692,17 @@ public:
 	// clock/timing accessors
 	u32 clock() const { return m_clock; }
 	u32 unscaled_clock() const { return m_unscaled_clock; }
-	void set_unscaled_clock(u32 clock);
-	void set_unscaled_clock(const XTAL &xtal) { set_unscaled_clock(xtal.value()); }
-	void set_unscaled_clock_int(u32 clock) { set_unscaled_clock(clock); } // non-overloaded name because binding to overloads is ugly
+	void set_unscaled_clock(u32 clock, bool sync_on_new_clock_domain = false);
+	void set_unscaled_clock(const XTAL &xtal, bool sync_on_new_clock_domain = false) { set_unscaled_clock(xtal.value(), sync_on_new_clock_domain); }
+	void set_unscaled_clock_int(u32 clock) { set_unscaled_clock(clock, false); } // non-overloaded name because binding to overloads is ugly
+	void set_unscaled_clock_int_sync(u32 clock) { set_unscaled_clock(clock, true); } // non-overloaded name because binding to overloads is ugly
 	double clock_scale() const { return m_clock_scale; }
 	void set_clock_scale(double clockscale);
 	attotime clocks_to_attotime(u64 clocks) const noexcept;
 	u64 attotime_to_clocks(const attotime &duration) const noexcept;
 
 	// timer interfaces
-	emu_timer *timer_alloc(device_timer_id id = 0, void *ptr = nullptr);
-	void timer_set(const attotime &duration, device_timer_id id = 0, int param = 0, void *ptr = nullptr);
-	void synchronize(device_timer_id id = 0, int param = 0, void *ptr = nullptr) { timer_set(attotime::zero, id, param, ptr); }
-	void timer_expired(emu_timer &timer, device_timer_id id, int param, void *ptr) { device_timer(timer, id, param, ptr); }
+	template <typename... T> emu_timer *timer_alloc(T &&... args);
 
 	/// \brief Register data for save states
 	///
@@ -836,7 +828,7 @@ protected:
 	void debug_setup();
 	void pre_save();
 	void post_load();
-	void notify_clock_changed();
+	void notify_clock_changed(bool sync_on_new_clock_domain = false);
 	finder_base *register_auto_finder(finder_base &autodev);
 	void register_callback(devcb_base &callback);
 
@@ -978,7 +970,6 @@ protected:
 
 	virtual void device_clock_changed();
 	virtual void device_debug_setup();
-	virtual void device_timer(emu_timer &timer, device_timer_id id, int param, void *ptr);
 
 	//------------------- end derived class overrides
 
@@ -1184,7 +1175,7 @@ public:
 	/// \sa interface_pre_save device_t::device_post_load
 	virtual void interface_post_load() ATTR_COLD;
 
-	virtual void interface_clock_changed();
+	virtual void interface_clock_changed(bool sync_on_new_clock_domain);
 	virtual void interface_debug_setup();
 
 private:
